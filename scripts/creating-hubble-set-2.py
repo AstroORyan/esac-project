@@ -43,7 +43,7 @@ def main():
         dec = row['Dec']
         zooniverse_id = row['zooniverse_id']
 
-        if os.path.exists(f'{save_folder}/{zooniverse_id}/{zooniverse_id}.png'):
+        if os.path.exists(f'{save_folder}/thumbnails/{zooniverse_id}_300_300.png'):
             save_dict[zooniverse_id] = [f'{save_folder}/thumbnails/{zooniverse_id}_300_300.png']
             continue
 
@@ -53,9 +53,8 @@ def main():
             coordinates = coord,
             radius = 20 * u.arcsec,
             dataproduct_type = 'image',
-            obs_collection = 'HLA',
+            obs_collection = 'HST',
             calib_level = 3,
-            type = 'S',
             filters = ['F814W']
         )
 
@@ -75,38 +74,42 @@ def main():
             data_products
             .to_pandas()
             .query('dataproduct_type == "image"')
-            .query('obs_collection == "HLA"')
-            .query('type == "C"')
+            .query('obs_collection == "HST"')
+            .query('type == "D"')
             .query('calib_level == 3')
             .query('productType == "SCIENCE"')
+            .query('productSubGroupDescription == "DRC"')
             .merge(parent_obs,on='parent_obsid',how='right')
             .dropna(0,thresh=5)
         )
 
         create_savefolder(save_folder,zooniverse_id)
 
-        manifest = Observations.download_products(
-            download_products,
-            download_dir = f'{save_folder}/{zooniverse_id}',
-            extension = ['fits']
-        )
+        for j in range(len(download_products)):
+            manifest = Observations.download_products(
+               download_products[j],
+               download_dir = f'{save_folder}/{zooniverse_id}',
+               extension = ['fits']
+            )
 
-        for j in manifest:
-            file = j['Local Path']
+            file = list(manifest['Local Path'])[0]
             with fits.open(file,memmap=False) as hdul:
                 header = hdul[1].header
                 data = hdul[1].data
+                wcs_out = wcs.WCS(fobj=hdul, header = header)
                 hdul.close()
-            wcs_out = wcs.WCS(header)
 
             try:
-                cutout = Cutout2D(data,coord,(250,250),wcs=wcs_out,mode='strict')
+                cutout = Cutout2D(data,coord,(150,150),wcs=wcs_out,mode='strict')
             except:
                 continue
 
             if len(cutout.data[cutout.data == 0]) > 50:
                 continue
 
+            if len(cutout.data[np.isnan(cutout.data)]) > 0.25*(cutout.data.shape[0]*cutout.data.shape[1]):
+                continue
+            
             break
 
         if 'cutout' in locals():
@@ -115,16 +118,21 @@ def main():
             continue
 
         if len(cutout.data[cutout.data == 0]) > 50:
-                continue
+            continue
+
+        if len(cutout.data[np.isnan(cutout.data)]) > 0.25*(cutout.data.shape[0]*cutout.data.shape[1]):
+            continue
 
         cutout.data[cutout.data == 0] = np.nanmin(data)
 
         norm = ImageNormalize(
             cutout.data,
-            interval=ZScaleInterval(nsamples=7500,contrast = 0.05),
+            interval=ZScaleInterval(nsamples=5000,contrast = 0.05),
             stretch=LinearStretch(),
             clip=True
         )
+
+        del cutout
 
         plt.figure(figsize=(12,12))
         plt.imshow(cutout.data,cmap='Greys_r',norm=norm)

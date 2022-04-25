@@ -34,7 +34,7 @@ def main():
 
     df = pd.read_csv('/mmfs1/home/users/oryan/Zoobot/data/manifest/training-manifest-hec.csv')
     paths = list(df['file_loc'][:500])
-    labels = list(df['mergering_merger'][:500].astype(int))
+    labels = list(df['merging_merger'][:500].astype(int))
     logging.info('Labels: \n{}'.format(pd.value_counts(labels)))
 
     paths_train, paths_val, labels_train, labels_val = train_test_split(paths, labels, test_size=0.2, random_state=42)
@@ -53,7 +53,7 @@ def main():
     train_dataset = preprocess.preprocess_dataset(raw_train_dataset, preprocess_config)
     val_dataset = preprocess.preprocess_dataset(raw_val_dataset,preprocess_config)
 
-    pretrained_checkpoint = '/mmfs1/home/users/oryan/Zoobot/pretrained_models/decals_dr_trained_on_all_labelled_m0/checkpoint'
+    pretrained_checkpoint = '/mmfs1/home/users/oryan/Zoobot/pretrained_models/decals_dr_train_set_only_replicated/checkpoint'
 
     crop_size = int(requested_img_size * 0.75)
     resize_size = 224
@@ -67,7 +67,8 @@ def main():
         input_size = requested_img_size,
         crop_size = crop_size,
         resize_size = resize_size,
-        output_dim=None
+        output_dim=None,
+        expect_partial=True
     )
 
     base_model.trainable = False
@@ -84,7 +85,7 @@ def main():
     ])
 
     model = tf.keras.Sequential([
-        tf.keras.layers.InputLayer(shape=(requested_img_size, requested_img_size,1)),
+        tf.keras.layers.InputLayer(input_shape=(requested_img_size, requested_img_size,1)),
         base_model,
         new_head
     ])

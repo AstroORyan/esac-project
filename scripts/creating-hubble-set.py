@@ -22,9 +22,8 @@ import subprocess
 import sys
 from pathlib import Path
 import time
-from PIL import Image
+from PIL import Image, ImageOps
 import numpy as np
-import shutil
 import glob
 
 from astroquery.mast import Observations
@@ -35,20 +34,31 @@ from astropy.io import fits
 from astropy import wcs
 from astropy.nddata import Cutout2D
 from astropy.table import Table, join
-from astropy.visualization import ZScaleInterval, AsinhStretch, ImageNormalize
+from astropy.visualization import ZScaleInterval, LinearStretch, ImageNormalize
 
 ## Functions
+def zero_check(im):
+    if len(im[im == 0]) > 50:
+        return True
+    else:
+        return False
+
+def centre_check(im):
+    centre = im[int(im.shape[0]/2) - 3: int(im.shape[0]/2) + 3, int(im.shape[1]/2) - 3:int(im.shape[1]/2) + 3]
+    if np.mean(centre) > np.mean(im):
+        return False
+    else:
+        return True
 
 ## Main Function
 def main():
     
-    manifest_path = '/home/users/oryan/Zoobot/data/manifest/gz-hubble-local-manifest.csv'
-    save_path = '/mmfs1/storage/users/oryan/hubble-cutouts'
+    manifest_path = 'C:/Users/oryan/Documents/esac-project/manifests/gz-hubble-local-manifest.csv'
+    save_path = 'C:/Users/oryan/Documents/zoobot_new/preprocessed-cutouts/fromMAST'
 
     manifest_df = pd.read_csv(manifest_path)
 
     paths_dict = {}
-    mosaicked_dict = {}
 
     for i in range(0,len(manifest_df)):
         row = manifest_df.iloc[i]
@@ -57,8 +67,8 @@ def main():
         zooniverse_id = row['zooniverse_id']
         tel_fil = 'F814W'
         
-        if os.path.exists(f'/mmfs1/storage/users/oryan/hubble-cutouts/{zooniverse_id}.png'):
-            paths_dict[str(zooniverse_id)] = [f'/mmfs1/storage/users/oryan/hubble-cutouts/{zooniverse_id}.png']
+        if os.path.exists(f'C:/Users/oryan/Documents/zoobot_new/preprocessed-cutouts/fromMAST/{zooniverse_id}.png'):
+            paths_dict[str(zooniverse_id)] = [f'C:/Users/oryan/Documents/zoobot_new/preprocessed-cutouts/fromMAST/{zooniverse_id}.png']
             print(f'File {zooniverse_id} exists. Skipping...')
             continue
 
@@ -98,7 +108,7 @@ def main():
             continue
 
         while no_obs and counter < len(obs_id):
-            single_obs = Observations.query_criteria(obs_collection='HST',obs_id=obs_id)
+            single_obs = Observations.query_criteria(obs_collection=['HLA','HST'],obs_id=obs_id)
             if len(single_obs) > 0.5:
                 no_obs = False
             else:
@@ -127,52 +137,36 @@ def main():
 
         products_download.rename_columns(['obs_collection_1'],['obs_collection'])
 
-        download_manifest = Observations.download_products(
-            products_download,
-            productType='SCIENCE',
-            obs_collection = ['HST'],
-            download_dir = '/mmfs1/scratch/hpc/60/oryan/hubble-processed-data',
-            extension = ['fits']
-        )
-
-        fits_path = list(download_manifest['Local Path'])
-        skip_flag = False
-
-        if len(fits_path[0]) < 1.5:
-            with fits.open(fits_path) as hdul:
+        for i in range(len(products_download)):
+            download_manifest = Observations.download_products(
+                products_download[i],
+                productType='SCIENCE',
+                obs_collection = ['HST','HLA'],
+                download_dir = f'C:/Users/oryan/Documents/zoobot_new/preprocessed-cutouts/fromMAST/{zooniverse_id}',
+                extension = ['fits']
+            )
+    
+            fits_path = list(download_manifest['Local Path'])
+            skip_flag = False
+    
+            with fits.open(fits_path[0]) as hdul:
                 counts = hdul[1].data
                 head = hdul[1].header
                 hdul.close()
             w = wcs.WCS(head)
-            cutout = Cutout2D(counts, coord, (300,300), wcs=w, mode='partial').data
-        else:
-            for i in range(len(fits_path)):
-                with fits.open(fits_path[i]) as hdul:
-                    counts = hdul[1].data
-                    head = hdul[1].header
-                    hdul.close()
-                w = wcs.WCS(head)
-                cutout = Cutout2D(counts, coord, (300,300), wcs=w, mode='partial').data
-                if not np.isnan(cutout.data).any():
-                    break
-                elif i == len(fits_path) - 1:
-                    print(f'WARNING: Will need to mosaic for image {zooniverse_id}')
-                    skip_flag = True
-                    mosaicked_dict[zooniverse_id] = fits_path[0]
+            cutout = Cutout2D(counts, coord, (100,100), wcs=w, mode='partial').data
+            
+            centre_flag = centre_check(cutout)
+            zero_flag = zero_check(cutout)
+            
+            if zero_flag:
+                continue
+            if centre_flag:
+                continue
+            
+            break
 
-        if skip_flag:
-            continue
-
-        vmax = np.max(cutout)
-        mean = np.mean(cutout/vmax)
-        
-        std_dev = 0
-        for i in range(cutout.shape[0]):
-            for j in range(cutout.shape[1]):
-                std_dev += ((cutout[i,j]/vmax) - mean)**2
-        RMS_Con = np.sqrt(std_dev / (cutout.shape[0]*cutout.shape[1]))
-
-        norm = ImageNormalize(cutout, interval=ZScaleInterval(nsamples=5000,contrast=RMS_Con),stretch=AsinhStretch(),clip=True)
+        norm = ImageNormalize(cutout, interval=ZScaleInterval(nsamples=7500,contrast=0.05),stretch=LinearStretch(),clip=True)
 
         filepath = os.path.join(save_path, f'{zooniverse_id}.png')
         plt.figure(figsize=(10,10))
@@ -181,20 +175,21 @@ def main():
         plt.savefig(filepath,bbox_inches = 'tight', pad_inches=0,dpi=300)
         plt.close()
 
-        paths_dict[str(zooniverse_id)] = [filepath]
+        im = Image.open(f'{save_path}/{zooniverse_id}/{zooniverse_id}.png')
+        im_grey = ImageOps.grayscale(im)
+        im_grey.thumbnail([300,300])
+        im_shape = np.asarray(im_grey).shape
+        im_grey.save(f'{save_path}/thumbnails/{zooniverse_id}_{im_shape[0]}_{im_shape[1]}.png')
+        im.close()
 
-        if len(glob.glob('/mmfs1/scratch/hpc/60/oryan/hubble-processed-data/mastDownload/HST/*')) > 10:
-            print('Deleting Fits files...')
-            time.sleep(10)
-            shutil.rmtree('/mmfs1/scratch/hpc/60/oryan/hubble-processed-data/mastDownload/HST/')
+        paths_dict[zooniverse_id] = [f'{save_path}/thumbnails/{zooniverse_id}_{im_shape[0]}_{im_shape[1]}.png']
+
 
     save_manifest = pd.DataFrame(paths_dict).T.rename(columns={0 : 'grey_scale_image'})
-    mosaicked_manifest = pd.DataFrame(mosaicked_dict).T.rename(columns={0:'fits_path'})
 
     output_manifest = manifest_df.merge(save_manifest,left_on='zooniverse_id',right_index=True,how='left')
 
     output_manifest.to_csv(os.path.join(save_path,'gz-hubble-combined-manifest.csv'))
-    mosaicked_manifest.to_csv(os.path.join(save_path, 'gz-hubble-requiring_mosaicks.csv'))
 
     print('Algorithm Complete.')         
 
