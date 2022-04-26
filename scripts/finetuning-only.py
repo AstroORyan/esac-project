@@ -29,15 +29,17 @@ from zoobot.tensorflow.estimators import custom_layers
 ## Main Function
 def main():
     requested_img_size = 300
-    batch_size = 64
+    batch_size = 3
     file_format = 'png'
+    
+    folder = '/mmfs1/home/users/oryan/Zoobot/data/manifest'
 
-    df = (
-        pd.read_csv('/mmfs1/home/users/oryan/Zoobot/data/manifest/training-manifest-hec.csv')
-        .rename(columns={'interacting':'merging_merger','thumbnail_path':'file_loc'})
+    df = (pd.read_csv(f'{folder}/hubble-thumb-manifest-checked.csv',index_col = 0)
+    .reset_index()
     )
-    paths = list(df['file_loc'])
-    labels = list(df['merging_merger'].astype(int))
+    
+    paths = list(df['thumbnail_path'])
+    labels = list(df['interacting'].astype(int))
     logging.info('Labels: \n{}'.format(pd.value_counts(labels)))
 
     paths_train, paths_val, labels_train, labels_val = train_test_split(paths, labels, test_size=0.2, random_state=42)
@@ -50,18 +52,20 @@ def main():
         label_cols=['label'],
         input_size=requested_img_size,
         normalise_from_uint8=True,
+        input_channels=1,
         make_greyscale=True,
         permute_channels=False
     )
     train_dataset = preprocess.preprocess_dataset(raw_train_dataset, preprocess_config)
     val_dataset = preprocess.preprocess_dataset(raw_val_dataset,preprocess_config)
 
-    pretrained_checkpoint = '/mmfs1/home/users/oryan/Zoobot/pretrained_models/decals_dr_train_set_only_replicated/checkpoint'
+    folder = '/mmfs1/home/users/oryan/Zoobot/pretrained_models'
+    pretrained_checkpoint = f'{folder}/replicated_train_only_greyscale_tf/replicated_train_only_greyscale_tf/checkpoint'
 
     crop_size = int(requested_img_size * 0.75)
     resize_size = 224
 
-    log_dir = '/mmfs1/home/users/oryan/Zoobot/models/'
+    log_dir = '/mmfs1/home/users/oryan/Zoobot/models/logs'
 
     logging.info('Loading pretrained model from {}'.format(pretrained_checkpoint))
     base_model = define_model.load_model(
@@ -120,6 +124,8 @@ def main():
     for _ in range(5):
         losses.append(model.evaluate(val_dataset)[0])
     logging.info('Mean validation loss: {:.3f} (var {:.4f})'.format(np.mean(losses), np.var(losses)))
+
+    logging.info('Finetuning Complete.')
 
 ## Initialization
 if __name__ == '__main__':
