@@ -30,7 +30,7 @@ def evaluate_performance(model, test_dataset, run_name, log_dir, batch_size, tra
     losses = []
     accuracies = []
     for _ in range(5):
-        test_metrics = model.evaluate(test_dataset.repear(3),verbose = 0)
+        test_metrics = model.evaluate(test_dataset.repeat(3),verbose = 0)
         losses.append(test_metrics[0])
         accuracies.append(test_metrics[1])
     logging.info(f'Mean test loss {np.mean(losses)} (var {np.var(losses)})')
@@ -61,7 +61,7 @@ def evaluate_performance(model, test_dataset, run_name, log_dir, batch_size, tra
 
 ## Main Function
 def main():
-    run_name = '2022-04-26-HEC'
+    run_name = '2022-04-04-HEC'
 
     requested_img_size = 300
     batch_size = 64
@@ -69,28 +69,28 @@ def main():
     
     folder = '/mmfs1/home/users/oryan/Zoobot/data/manifest'
 
-    df = (pd.read_csv(f'{folder}/hubble-thumb-manifest-checked.csv',index_col = 0)
+    df = (pd.read_csv(f'{folder}/large-training-set-labelled.csv',index_col = 0)
     .reset_index()
     )
-    df_test = (
-        pd.read_csv(f'{folder}/hubble-thumb-valid-checked.csv',index_col=0)
-        .reset_index()
-    )
+    # df_test = (
+    #     pd.read_csv(f'{folder}/hubble-valid-manifest-checked.csv',index_col=0)
+    #     .reset_index()
+    # )
     
     paths = list(df['thumbnail_path'])
-    labels = list(df['interacting'].astype(int))
+    labels = list(df['interaction'].astype(int))
     logging.info('Labels: \n{}'.format(pd.value_counts(labels)))
 
     paths_train, paths_val, labels_train, labels_val = train_test_split(paths, labels, test_size=0.2, random_state=42)
-    paths_test = list(df_test['thumbnail_path'])
-    labels_test = list(df_test['interacting'])
+    # paths_test = list(df_test['thumbnail_path'])
+    # labels_test = list(df_test['interacting'])
     assert set(paths_train).intersection(set(paths_val)) == set()
-    assert set(paths_train).intersection(set(paths_test)) == set()
-    assert set(paths_val).intersection(set(paths_test)) == set()
+    # assert set(paths_train).intersection(set(paths_test)) == set()
+    # assert set(paths_val).intersection(set(paths_test)) == set()
 
     raw_train_dataset = image_datasets.get_image_dataset(paths_train,file_format=file_format, requested_img_size=requested_img_size, batch_size=batch_size, labels=labels_train)
     raw_val_dataset = image_datasets.get_image_dataset(paths_val, file_format=file_format, requested_img_size=requested_img_size, batch_size=batch_size,labels=labels_val)
-    raw_test_dataset = image_datasets.get_image_dataset(paths_test, file_format=file_format, requested_img_size = requested_img_size, batch_size = batch_size, labels=labels_test)
+    #raw_test_dataset = image_datasets.get_image_dataset(paths_test, file_format=file_format, requested_img_size = requested_img_size, batch_size = batch_size, labels=labels_test)
 
     train_dataset_size = len(paths_train)
 
@@ -104,7 +104,7 @@ def main():
     )
     train_dataset = preprocess.preprocess_dataset(raw_train_dataset, preprocess_config)
     val_dataset = preprocess.preprocess_dataset(raw_val_dataset,preprocess_config)
-    test_dataset = preprocess.preprocess_dataset(raw_test_dataset, preprocess_config)
+    #test_dataset = preprocess.preprocess_dataset(raw_test_dataset, preprocess_config)
 
     folder = '/mmfs1/home/users/oryan/Zoobot/pretrained_models'
     pretrained_checkpoint = f'{folder}/replicated_train_only_greyscale_tf/replicated_train_only_greyscale_tf/checkpoint'
@@ -122,19 +122,27 @@ def main():
         crop_size = crop_size,
         resize_size = resize_size,
         output_dim=None,
+        channels=1,
         expect_partial=True
     )
 
     base_model.trainable = False
 
+    para_relu = layers.PReLU()
+
     new_head = tf.keras.Sequential([
         layers.InputLayer(input_shape=(7,7,1280)),
         layers.GlobalAveragePooling2D(),
+        layers.Dense(64,activation=para_relu),
         #layers.Dropout(0.75),
+        layers.Dense(64,activation='elu'),
+        layers.Dropout(0.25),
         layers.Dense(64,activation='relu'),
-        layers.Dropout(0.75),
+        layers.Dropout(0.25),
         layers.Dense(64,activation='relu'),
-        layers.Dropout(0.75),
+        layers.Dropout(0.25),
+        layers.Dense(64,activation = para_relu),
+        layers.Dropout(0.25),
         layers.Dense(1,activation='sigmoid',name='sigmoid_output')
     ])
 
@@ -144,7 +152,8 @@ def main():
         new_head
     ])
 
-    epochs = 250
+    epochs = 1500
+    patience = 30
     loss = tf.keras.losses.binary_crossentropy
 
     model.compile(
@@ -152,30 +161,25 @@ def main():
         optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
         metrics=['accuracy']
     )
-    model.summary()
+    model.summary(print_fn=logging.info)
 
+    log_dir_head = os.path.join(log_dir, 'trained-head')
     train_config = training_config.TrainConfig(
-        log_dir=log_dir,
+        log_dir=log_dir_head,
         epochs=epochs,
-        patience=int(epochs/10)
+        patience=patience
     )
     
     training_config.train_estimator(
         model,
         train_config,
         train_dataset,
-        val_dataset,
-        verbose=1
-    )
-
-    losses = []
-    for _ in range(5):
-        losses.append(model.evaluate(val_dataset)[0])
-    logging.info('Mean validation loss: {:.3f} (var {:.4f})'.format(np.mean(losses), np.var(losses)))
+        val_dataset
+        )
 
     evaluate_performance(
         model=model,
-        test_dataset=test_dataset,
+        test_dataset=val_dataset,
         run_name=run_name + '_transfer_1',
         log_dir=log_dir,
         batch_size = batch_size,
@@ -183,7 +187,7 @@ def main():
     )
 
     logging.info('Unfreezing Layers')
-    utils.unfreeze_model(model, unfreeze_names = ['top'])
+    utils.unfreeze_model(model, unfreeze_names = [],unfreeze_all = True)
 
     logging.info('Recompiling with lower learning rate and trainable upper layers')
     model.compile(
@@ -194,11 +198,11 @@ def main():
 
     model.summary(print_fn = logging.info)
 
-    log_dir_full = os.path.join(log_dir, 'full')
+    log_dir_full = os.path.join(log_dir, 'finetuned')
     train_config_full = training_config.TrainConfig(
         log_dir=log_dir_full,
         epochs=epochs,
-        patience=30
+        patience=patience
     )
 
     training_config.train_estimator(
@@ -212,7 +216,7 @@ def main():
 
     evaluate_performance(
         model=model,
-        test_dataset=test_dataset,
+        test_dataset=val_dataset,
         run_name=run_name + '_finetuned',
         log_dir=log_dir,
         batch_size=batch_size,

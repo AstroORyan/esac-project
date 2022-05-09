@@ -12,6 +12,7 @@ from PIL import Image, ImageOps
 import os
 import glob
 import sys
+import shutil
 
 from astroquery.mast import Observations
 
@@ -26,25 +27,30 @@ from astropy.visualization import ZScaleInterval, LinearStretch, ImageNormalize
 
 ## Functions
 def create_savefolder(folder,id):
-    if os.path.exists(f'{folder}/{id}'):
+    if os.path.exists(f'{folder}/fromMAST/{id}'):
         pass
     else:
-        os.mkdir(f'{folder}/{id}')
+        os.mkdir(f'{folder}/fromMAST/{id}')
+
+def file_cleaner():
+    rm_path = glob.glob('/mmfs1/scratch/hpc/60/oryan/fromMAST/*')
+    for i in rm_path:
+        shutil.rmtree(i)
 
 ## Main Function
 def main():
-    df = pd.read_csv('/mmfs1/home/users/oryan/Zoobot/data/manifest/gz-hubble-local-manifest.csv',index_col=0)
-    save_folder = '/mmfs1/scratch/hpc/60/oryan/fromMAST'
+    df = pd.read_csv('/mmfs1/home/users/oryan/Zoobot/data/manifest/large-training-set.csv',index_col=0)
+    save_folder = '/mmfs1/scratch/hpc/60/oryan'
     save_dict = {}
 
     for i in range(len(df)):
         row = df.iloc[i]
         ra = row['RA']
-        dec = row['Dec']
+        dec = row['DEC']
         zooniverse_id = row['zooniverse_id']
 
-        if os.path.exists(f'{save_folder}/thumbnails/{zooniverse_id}_300_300.png'):
-            save_dict[zooniverse_id] = [f'{save_folder}/thumbnails/{zooniverse_id}_300_300.png']
+        if os.path.exists(f'{save_folder}/thumbnails/{zooniverse_id}_300_300_3.png'):
+            save_dict[zooniverse_id] = [f'{save_folder}/thumbnails/{zooniverse_id}_300_300_3.png']
             continue
 
         coord = SkyCoord(ra = ra*u.deg, dec = dec*u.deg, frame='fk5')
@@ -54,6 +60,7 @@ def main():
             radius = 20 * u.arcsec,
             dataproduct_type = 'image',
             obs_collection = 'HST',
+            instrument_name='ACS/WFC',
             calib_level = 3,
             filters = ['F814W']
         )
@@ -88,7 +95,7 @@ def main():
         for j in range(len(download_products)):
             manifest = Observations.download_products(
                download_products[j],
-               download_dir = f'{save_folder}/{zooniverse_id}',
+               download_dir = f'{save_folder}/fromMAST/{zooniverse_id}',
                extension = ['fits']
             )
 
@@ -132,27 +139,28 @@ def main():
             clip=True
         )
 
-        del cutout
-
         plt.figure(figsize=(12,12))
         plt.imshow(cutout.data,cmap='Greys_r',norm=norm)
         plt.axis('off')
-        plt.savefig(f'{save_folder}/{zooniverse_id}/{zooniverse_id}.png', dpi=300, bbox_inches='tight',pad_inches=0)
+        plt.savefig(f'{save_folder}/fromMAST/{zooniverse_id}/{zooniverse_id}.png', dpi=300, bbox_inches='tight',pad_inches=0)
         plt.close()
 
-        del data, header
+        del data, header, cutout
 
-        im = Image.open(f'{save_folder}/{zooniverse_id}/{zooniverse_id}.png')
-        im_grey = ImageOps.grayscale(im)
+        im = Image.open(f'{save_folder}/fromMAST/{zooniverse_id}/{zooniverse_id}.png')
+        im_grey = im.convert('RGB')
         im_grey.thumbnail([300,300])
         im_shape = np.asarray(im_grey).shape
-        im_grey.save(f'{save_folder}/thumbnails/{zooniverse_id}_{im_shape[0]}_{im_shape[1]}.png')
+        im_grey.save(f'{save_folder}/thumbnails/{zooniverse_id}_{im_shape[0]}_{im_shape[1]}_{im_shape[2]}.png')
         im.close()
 
         save_dict[zooniverse_id] = [f'{save_folder}/thumbnails/{zooniverse_id}_{im_shape[0]}_{im_shape[1]}.png']
 
+        if len(glob.glob('/mmfs1/scratch/hpc/60/oryan/fromMAST/*')) > 500:
+            file_cleaner()
+
     save_df = pd.DataFrame(save_dict).T.rename(columns={0 : 'thumbnail_path'})
-    save_df.to_csv(f'{save_folder}/hubble-thumb-manifest.csv')
+    save_df.to_csv(f'{save_folder}/thumbnails/large-training-manifest.csv')
 
 
 ## Initialization
