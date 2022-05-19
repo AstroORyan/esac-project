@@ -11,13 +11,7 @@ from matplotlib import pyplot as plt
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from PIL import Image, ImageOps
 import os
-import glob
-import sys
-import shutil
-from multiprocessing import Pool
-import io
 
 from astroquery.mast import Observations
 
@@ -37,9 +31,6 @@ def create_savefolder(folder,id):
     else:
         os.mkdir(f'{folder}/fromMAST/{id}')
 
-def file_cleaner(rm_path):
-    shutil.rmtree(rm_path)
-
 ## Main Function
 def main(row):
     ra = row['RA']
@@ -48,7 +39,7 @@ def main(row):
 
     save_folder = '/mmfs1/scratch/hpc/60/oryan'
 
-    if os.path.exists(f'{save_folder}/thumbnails_par/{zooniverse_id}_300_300_3.png'):
+    if os.path.exists(f'{save_folder}/full-gz-set/{zooniverse_id}.jpeg'):
         return
 
     create_savefolder(save_folder,zooniverse_id)
@@ -147,34 +138,20 @@ def main(row):
         interval=ZScaleInterval(nsamples=5000,contrast = 0.05),
         stretch=LinearStretch(),
         clip=True
-    )
+        )
 
-    plt.figure(figsize=(12,12))
+    plt.figure()
     plt.imshow(cutout.data,cmap='Greys_r',norm=norm)
     plt.axis('off')
-    buf = io.BytesIO()
-    buf.seek(0)
-    plt.savefig(buf)
+    figure = plt.gcf()
+    figure.set_size_inches(4,4)
+    plt.savefig(f'{save_folder}/full-gz-set/{zooniverse_id}.jpeg', dpi=100, bbox_inches='tight',pad_inches=0)
     plt.close()
-
-    del header, cutout
-
-    im = Image.open(buf)
-    im_grey = im.convert('RGB')
-    im_grey.thumbnail([300,300])
-    im_shape = np.asarray(im_grey).shape
-    im_grey.save(f'{save_folder}/thumbnails_par/{zooniverse_id}_{im_shape[0]}_{im_shape[1]}_{im_shape[2]}.png')
-    im.close()
-
-    file_cleaner(f'{save_folder}/fromMAST/{zooniverse_id}')
 
 ## Initialization
 if __name__ == '__main__':
-    df = pd.read_csv('/mmfs1/home/users/oryan/Zoobot/data/manifest/full-manifest.csv',index_col=0)
+    df = pd.read_csv('/mmfs1/home/users/oryan/Zoobot/data/manifest/all-gz-validation-set.csv',index_col=0)
 
     ## Note, can't just input a DataFrame in multiprocessing. Need to create a lazy iterator. Done before setting up Pool:
-    df_reindex = df.reset_index().drop(columns='index')
-    seq = [df_reindex.iloc[rows] for rows in df_reindex.index]
-
-    with Pool(processes = 10) as pool:
-        pool.map(main, seq)
+    for _, i in df.iterrows():
+        main(i)

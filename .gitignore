@@ -136,6 +136,8 @@ events.out*
 # Images
 *.png
 *.jpeg
+*.fits
+*.fits.gz
 
 # Data not to share
 *.csv

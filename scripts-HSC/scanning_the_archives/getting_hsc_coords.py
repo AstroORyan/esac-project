@@ -46,7 +46,19 @@ def test_func(data, wcs, coords):
 def get_coords(file):
     data, wcs = get_fits(file)
     central_coord = wcs.pixel_to_world(int(data.shape[0]/2), int(data.shape[1]/2))
-    catalogue_data = Catalogs.query_region(central_coord, radius=0.05, catalog='HSC')
+
+    attempt = 0
+    downloaded = False
+    while attempt < 3 and downloaded == False:
+        try:
+            catalogue_data = Catalogs.query_region(central_coord, radius=0.05, catalog='HSC')
+            downloaded = True
+        except: 
+            attempt += 1
+
+    if attempt == 3:
+        catalogue_data = []
+
     if len(catalogue_data) == 0:
         logging.info(f'No sources found in {file}. Investigate?')
         return None, None, None
